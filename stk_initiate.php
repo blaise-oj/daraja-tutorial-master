@@ -5,8 +5,8 @@ if(isset($_POST['submit'])){
   date_default_timezone_set('Africa/Nairobi');
 
   # access token
-  $consumerKey = 'nk16Y74eSbTaGQgc9WF8j6FigApqOMWr'; //Fill with your app Consumer Key
-  $consumerSecret = '40fD1vRXCq90XFaU'; // Fill with your app Secret
+  $consumerKey = 'hfkrVaT3p0oWXqKxATAbrAktheqv5IGbdWcu24VaCbWe3X1E'; //Fill with your app Consumer Key
+  $consumerSecret = 'CLIG7AanFnCQdm4V0tLWxR313Qidq5WiAAG6b6dBc6d0QoKmZQADu6xmJzlkI85W'; // Fill with your app Secret
 
   # define the variales
   # provide the following details, this part is found on your test credentials on the developer account
@@ -42,7 +42,7 @@ if(isset($_POST['submit'])){
   $initiate_url = 'https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest';
 
   # callback url
-  $CallBackURL = 'https://morning-basin-87523.herokuapp.com/callback_url.php';  
+  $CallBackURL = 'https://morning-gorge-89868-fdf9ea11de4f.herokuapp.com/callback_url.php';  
 
   $curl = curl_init($access_token_url);
   curl_setopt($curl, CURLOPT_HTTPHEADER, $headers);
