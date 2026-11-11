@@ -1,90 +1,144 @@
+
 <?php
-if(isset($_POST['submit'])){
 
+require_once __DIR__ . '/config.php';
 
-  date_default_timezone_set('Africa/Nairobi');
+header('Content-Type: application/json');
 
-  # access token
-  $consumerKey = 'hfkrVaT3p0oWXqKxATAbrAktheqv5IGbdWcu24VaCbWe3X1E'; //Fill with your app Consumer Key
-  $consumerSecret = 'CLIG7AanFnCQdm4V0tLWxR313Qidq5WiAAG6b6dBc6d0QoKmZQADu6xmJzlkI85W'; // Fill with your app Secret
+// Only accept POST requests
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    echo json_encode([
+        'success' => false,
+        'message' => 'Method not allowed'
+    ]);
+    exit;
+}
 
-  # define the variales
-  # provide the following details, this part is found on your test credentials on the developer account
-  $BusinessShortCode = '174379';
-  $Passkey = 'bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919';  
-  
-  /*
-    This are your info, for
-    $PartyA should be the ACTUAL clients phone number or your phone number, format 2547********
-    $AccountRefference, it maybe invoice number, account number etc on production systems, but for test just put anything
-    TransactionDesc can be anything, probably a better description of or the transaction
-    $Amount this is the total invoiced amount, Any amount here will be 
-    actually deducted from a clients side/your test phone number once the PIN has been entered to authorize the transaction. 
-    for developer/test accounts, this money will be reversed automatically by midnight.
-  */
-  
-   $PartyA = $_POST['phone']; // This is your phone number, 
-  $AccountReference = '2255';
-  $TransactionDesc = 'Test Payment';
-  $Amount = $_POST['amount'];
- 
-  # Get the timestamp, format YYYYmmddhms -> 20181004151020
-  $Timestamp = date('YmdHis');    
-  
-  # Get the base64 encoded string -> $password. The passkey is the M-PESA Public Key
-  $Password = base64_encode($BusinessShortCode.$Passkey.$Timestamp);
+// Read form information
+$amount = $_POST['amount'] ?? '';
+$phone = $_POST['phone'] ?? ($_POST['msisdn'] ?? '');
 
-  # header for access token
-  $headers = ['Content-Type:application/json; charset=utf8'];
+// Check required information
+if (!is_numeric($amount) || (float)$amount <= 0 ||
+    (float)$amount != (int)$amount) {
+    http_response_code(400);
+    echo json_encode([
+        'success' => false,
+        'message' => 'Enter a valid whole-number amount.'
+    ]);
+    exit;
+}
 
-    # M-PESA endpoint urls
-  $access_token_url = 'https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials';
-  $initiate_url = 'https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest';
+// Convert phone number to 254 format
+$phone = preg_replace('/[\s\-+]/', '', trim($phone));
 
-  # callback url
-  $CallBackURL = 'https://morning-gorge-89868-fdf9ea11de4f.herokuapp.com/callback_url.php';  
+if (preg_match('/^(07|01)[0-9]{8}$/', $phone)) {
+    $phone = '254' . substr($phone, 1);
+} elseif (preg_match('/^254(7|1)[0-9]{8}$/', $phone)) {
+    // Already in international format
+} else {
+    http_response_code(400);
+    echo json_encode([
+        'success' => false,
+        'message' => 'Enter a valid Kenyan M-Pesa phone number.'
+    ]);
+    exit;
+}
 
-  $curl = curl_init($access_token_url);
-  curl_setopt($curl, CURLOPT_HTTPHEADER, $headers);
-  curl_setopt($curl, CURLOPT_RETURNTRANSFER, TRUE);
-  curl_setopt($curl, CURLOPT_HEADER, FALSE);
-  curl_setopt($curl, CURLOPT_USERPWD, $consumerKey.':'.$consumerSecret);
-  $result = curl_exec($curl);
-  $status = curl_getinfo($curl, CURLINFO_HTTP_CODE);
-  $result = json_decode($result);
-  $access_token = $result->access_token;  
-  curl_close($curl);
+// Check API credentials
+if (!MEGAPAY_API_KEY || !MEGAPAY_EMAIL) {
+    http_response_code(500);
+    echo json_encode([
+        'success' => false,
+        'message' => 'Payment configuration is missing.'
+    ]);
+    exit;
+}
 
-  # header for stk push
-  $stkheader = ['Content-Type:application/json','Authorization:Bearer '.$access_token];
+// Generate a unique payment reference
+$reference = 'ORDER_' . strtoupper(bin2hex(random_bytes(5)));
 
-  # initiating the transaction
-  $curl = curl_init();
-  curl_setopt($curl, CURLOPT_URL, $initiate_url);
-  curl_setopt($curl, CURLOPT_HTTPHEADER, $stkheader); //setting custom header
+// Prepare MegaPay request
+$requestData = [
+    'api_key' => MEGAPAY_API_KEY,
+    'email' => MEGAPAY_EMAIL,
+    'amount' => (int)$amount,
+    'msisdn' => $phone,
+    'reference' => $reference
+];
 
-  $curl_post_data = array(
-    //Fill in the request parameters with valid values
-    'BusinessShortCode' => $BusinessShortCode,
-    'Password' => $Password,
-    'Timestamp' => $Timestamp,
-    'TransactionType' => 'CustomerPayBillOnline',
-    'Amount' => $Amount,
-    'PartyA' => $PartyA,
-    'PartyB' => $BusinessShortCode,
-    'PhoneNumber' => $PartyA,
-    'CallBackURL' => $CallBackURL,
-    'AccountReference' => $AccountReference,
-    'TransactionDesc' => $TransactionDesc
-  );
+// Send request to MegaPay
+$ch = curl_init(MEGAPAY_API_URL . '/initiatestk');
 
-  $data_string = json_encode($curl_post_data);
-  curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
-  curl_setopt($curl, CURLOPT_POST, true);
-  curl_setopt($curl, CURLOPT_POSTFIELDS, $data_string);
-  $curl_response = curl_exec($curl);
-  print_r($curl_response);
+curl_setopt_array($ch, [
+    CURLOPT_POST => true,
+    CURLOPT_POSTFIELDS => json_encode($requestData),
+    CURLOPT_HTTPHEADER => [
+        'Content-Type: application/json',
+        'Accept: application/json'
+    ],
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_CONNECTTIMEOUT => 15,
+    CURLOPT_TIMEOUT => 30
+]);
 
-  echo $curl_response;
-};
+$response = curl_exec($ch);
+$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+$curlError = curl_error($ch);
+
+curl_close($ch);
+
+// Handle connection errors
+if ($response === false) {
+    error_log('MegaPay connection error: ' . $curlError);
+
+    http_response_code(502);
+    echo json_encode([
+        'success' => false,
+        'message' => 'Could not connect to the payment service.'
+    ]);
+    exit;
+}
+
+// Decode MegaPay response
+$result = json_decode($response, true);
+
+if (!is_array($result)) {
+    error_log('Invalid MegaPay response: ' . $response);
+
+    http_response_code(502);
+    echo json_encode([
+        'success' => false,
+        'message' => 'Invalid response from payment service.'
+    ]);
+    exit;
+}
+
+// Check whether MegaPay accepted the request
+if ($httpCode >= 200 && $httpCode < 300 &&
+    isset($result['success']) &&
+    (string)$result['success'] === '200' &&
+    !empty($result['transaction_request_id'])) {
+
+    echo json_encode([
+        'success' => true,
+        'message' => 'STK Push request sent.',
+        'reference' => $reference,
+        'transaction_request_id' => $result['transaction_request_id']
+    ]);
+    exit;
+}
+
+// Payment request was not accepted
+error_log('MegaPay initiation response: ' . $response);
+
+http_response_code(400);
+echo json_encode([
+    'success' => false,
+    'message' => $result['message'] ??
+                 $result['massage'] ??
+                 'MegaPay could not initiate the payment.'
+]);
+
 ?>
